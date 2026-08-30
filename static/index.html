@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LogAi — syslog triage</title>
+<style>
+:root{
+  --bg:#0F1419; --surface:#171D24; --raised:#1E252E; --border:#2A333D;
+  --text:#E4E9EE; --muted:#7D8996; --dim:#5A6672;
+  --accent:#4DB8A8; --accent-dim:#2E6B62;
+  --s0:#FF5C5C; --s3:#FF8A4C; --s4:#E8B54A; --s5:#6BA8D6; --s6:#5D6E7E; --s7:#4A5763;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.5}
+button{font-family:inherit;font-size:12px;cursor:pointer;border-radius:4px;
+  border:1px solid var(--border);background:var(--raised);color:var(--text);padding:5px 10px}
+button:hover{border-color:var(--accent-dim);color:var(--accent)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button.primary{background:var(--accent-dim);border-color:var(--accent-dim);color:#DFF5F1}
+button.primary:hover{background:var(--accent);color:#06110F}
+input,select{font-family:var(--mono);font-size:12px;background:var(--bg);color:var(--text);
+  border:1px solid var(--border);border-radius:4px;padding:5px 8px}
+input:focus,select:focus{outline:none;border-color:var(--accent-dim)}
+
+header{display:flex;align-items:center;gap:18px;padding:12px 20px;
+  border-bottom:1px solid var(--border);background:var(--surface);flex-wrap:wrap}
+.brand{font-family:var(--mono);font-size:15px;letter-spacing:.06em}
+.brand b{color:var(--accent);font-weight:500}
+.pill{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:99px;
+  border:1px solid var(--border);color:var(--muted);white-space:nowrap}
+.pill.on{border-color:var(--accent-dim);color:var(--accent)}
+.pill.off{border-color:#5C3030;color:#D98080}
+.stats{display:flex;gap:20px;margin-left:auto;flex-wrap:wrap}
+.stat{font-family:var(--mono);font-size:11px;color:var(--dim);text-align:right}
+.stat b{display:block;font-size:17px;font-weight:500;color:var(--text);line-height:1.2}
+
+main{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);
+  gap:1px;background:var(--border);min-height:calc(100vh - 57px)}
+section{background:var(--bg);padding:16px 20px;min-width:0}
+.shead{display:flex;align-items:baseline;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+h2{font-size:12px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.note{font-size:11px;color:var(--dim);font-family:var(--mono)}
+.tools{margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+
+.alerts{border:1px solid #5C3030;background:#1C1315;border-radius:6px;padding:10px 12px;margin-bottom:12px}
+.alert-row{display:flex;gap:10px;align-items:center;font-family:var(--mono);font-size:11px;
+  padding:3px 0;color:#E9B4B4}
+.alert-row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.issue{border:1px solid var(--border);border-radius:6px;margin-bottom:8px;background:var(--surface);
+  border-left:3px solid var(--sev)}
+.issue-hd{display:grid;grid-template-columns:46px 1fr auto;gap:12px;align-items:center;
+  padding:10px 12px;cursor:pointer}
+.issue-hd:hover{background:var(--raised)}
+.rank{font-family:var(--mono);font-size:19px;font-weight:500;color:var(--sev);text-align:center;line-height:1}
+.rank small{display:block;font-size:9px;color:var(--dim);letter-spacing:.08em;margin-top:2px}
+.tmpl{font-family:var(--mono);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta{font-size:11px;color:var(--dim);margin-top:3px;font-family:var(--mono)}
+.badge{font-family:var(--mono);font-size:10px;padding:2px 6px;border-radius:3px;
+  border:1px solid var(--border);color:var(--muted);white-space:nowrap}
+.badge.ai{border-color:var(--accent-dim);color:var(--accent)}
+.badge.unv{border-color:#6B5A2E;color:#D6B45A}
+
+.scorebar{display:flex;height:4px;border-radius:2px;overflow:hidden;background:var(--raised);margin-top:7px}
+.scorebar i{display:block;height:100%}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:8px}
+.legend span{display:flex;align-items:center;gap:4px}
+.legend i{width:8px;height:8px;border-radius:2px;display:inline-block}
+
+.body{border-top:1px solid var(--border);padding:12px;display:none}
+.issue.open .body{display:block}
+.panel{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:11px;margin-bottom:10px}
+.panel h4{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+  font-weight:500;margin-bottom:7px}
+.finding-title{font-size:14px;margin-bottom:6px}
+.kv{font-size:12.5px;margin-bottom:7px;color:var(--muted)}
+.kv b{color:var(--text);font-weight:500}
+.steps{font-family:var(--mono);font-size:12px;white-space:pre-wrap;color:var(--text);
+  background:var(--surface);border-radius:4px;padding:9px;border-left:2px solid var(--accent-dim)}
+.cites{font-family:var(--mono);font-size:11px;color:var(--accent);margin-top:7px}
+.ev{font-family:var(--mono);font-size:11.5px;padding:4px 0;border-bottom:1px solid var(--border);
+  display:flex;gap:9px;color:var(--muted)}
+.ev:last-child{border-bottom:none}
+.ev .id{color:var(--dim);min-width:52px}
+.ev .msg{flex:1;min-width:0;color:var(--text);word-break:break-word}
+.ev.cited{background:#12211F;margin:0 -4px;padding:4px}
+.acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+
+.stream{font-family:var(--mono);font-size:11.5px;max-height:calc(100vh - 190px);overflow-y:auto;
+  border:1px solid var(--border);border-radius:6px}
+.line{display:grid;grid-template-columns:62px 60px 96px 1fr;gap:8px;padding:3px 9px;
+  border-bottom:1px solid #1C232B}
+.line:hover{background:var(--surface)}
+.line .sev{color:var(--sv);font-weight:500}
+.line .tm,.line .hs{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.line .m{color:var(--muted);word-break:break-word}
+.filters{display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.filters input[type=search]{flex:1;min-width:120px}
+.empty{color:var(--dim);font-family:var(--mono);font-size:12px;padding:26px 0;text-align:center}
+.toast{position:fixed;bottom:18px;right:18px;background:var(--raised);border:1px solid var(--accent-dim);
+  color:var(--accent);font-family:var(--mono);font-size:12px;padding:9px 14px;border-radius:5px;
+  opacity:0;transition:opacity .2s;pointer-events:none;max-width:340px}
+.toast.show{opacity:1}
+.toast.err{border-color:#5C3030;color:#E9B4B4}
+@media(max-width:960px){main{grid-template-columns:1fr}.stream{max-height:420px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><b>Log</b>Ai</div>
+  <div class="pill" id="p-ai">checking…</div>
+  <div class="pill" id="p-syslog">syslog —</div>
+  <div class="stats">
+    <div class="stat"><b id="s-ev">0</b>events</div>
+    <div class="stat"><b id="s-5m">0</b>last 5m</div>
+    <div class="stat"><b id="s-cl">0</b>issues</div>
+    <div class="stat"><b id="s-fi">0</b>reviewed</div>
+    <div class="stat"><b id="s-al">0</b>alerts</div>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="shead">
+      <h2>Top issues</h2>
+      <span class="note">ranked deterministically — no model involved</span>
+      <div class="tools">
+        <button id="btn-triage" class="primary">Run AI triage</button>
+        <button id="btn-refresh">Refresh</button>
+      </div>
+    </div>
+    <div id="alerts"></div>
+    <div id="issues"><div class="empty">waiting for syslog traffic…</div></div>
+  </section>
+
+  <section>
+    <div class="shead">
+      <h2>Live events</h2>
+      <span class="note" id="stream-count"></span>
+    </div>
+    <div class="filters">
+      <input type="search" id="f-q" placeholder="search message…" aria-label="Search messages">
+      <input type="text" id="f-host" placeholder="host" style="width:110px" aria-label="Filter by host">
+      <select id="f-sev" aria-label="Minimum severity">
+        <option value="7">all severities</option>
+        <option value="4">warning and worse</option>
+        <option value="3">error and worse</option>
+        <option value="2">critical and worse</option>
+      </select>
+    </div>
+    <div class="stream" id="stream"></div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SEV = {0:'emerg',1:'alert',2:'crit',3:'err',4:'warning',5:'notice',6:'info',7:'debug'};
+const SEVC = {0:'var(--s0)',1:'var(--s0)',2:'var(--s0)',3:'var(--s3)',4:'var(--s4)',5:'var(--s5)',6:'var(--s6)',7:'var(--s7)'};
+const PARTS = [
+  ['severity','#FF5C5C'],['volume','#E8B54A'],['burst','#FF8A4C'],
+  ['host_spread','#6BA8D6'],['novelty','#4DB8A8']
+];
+const open = new Set();
+let busy = false;
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function toast(msg, isErr) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.className = 'toast', 4200);
+}
+
+async function jget(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(await r.text().catch(() => r.status));
+  return r.json();
+}
+
+async function loadHealth() {
+  try {
+    const h = await jget('/api/health');
+    const ai = document.getElementById('p-ai');
+    ai.textContent = `${h.ai.provider} · ${h.ai.model}`;
+    ai.className = 'pill ' + (h.ai.ok ? 'on' : 'off');
+    ai.title = h.ai.detail || '';
+    document.getElementById('p-syslog').textContent =
+      `syslog udp/${h.syslog.udp} tcp/${h.syslog.tcp}`;
+    const s = h.stats;
+    document.getElementById('s-ev').textContent = s.events.toLocaleString();
+    document.getElementById('s-5m').textContent = s.events_5m.toLocaleString();
+    document.getElementById('s-cl').textContent = s.clusters.toLocaleString();
+    document.getElementById('s-fi').textContent = s.findings.toLocaleString();
+    document.getElementById('s-al').textContent = s.open_alerts.toLocaleString();
+  } catch (e) { /* header stays stale rather than blanking */ }
+}
+
+async function loadAlerts() {
+  try {
+    const list = await jget('/api/alerts');
+    const el = document.getElementById('alerts');
+    if (!list.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<div class="alerts">' + list.slice(0, 5).map(a =>
+      `<div class="alert-row">
+         <span>▲</span>
+         <span class="t">${esc(a.template)}</span>
+         <span>${a.score}</span>
+         <button onclick="ackAlert(${a.id})">Ack</button>
+       </div>`).join('') + '</div>';
+  } catch (e) {}
+}
+
+async function ackAlert(id) {
+  await fetch(`/api/alerts/${id}/ack`, { method: 'POST' });
+  loadAlerts(); loadHealth();
+}
+
+function scorebar(b) {
+  if (!b) return '';
+  const total = PARTS.reduce((a, [k]) => a + Math.max(0, b[k] || 0), 0) || 1;
+  return '<div class="scorebar">' + PARTS.map(([k, c]) =>
+    `<i style="width:${(Math.max(0, b[k] || 0) / total * 100).toFixed(1)}%;background:${c}"></i>`
+  ).join('') + '</div><div class="legend">' + PARTS.map(([k, c]) =>
+    `<span><i style="background:${c}"></i>${k.replace('_', ' ')} ${(b[k] || 0)}</span>`
+  ).join('') + `<span>${b.recent_5m} in last 5m</span></div>`;
+}
+
+function findingHTML(f) {
+  if (!f) return `<div class="panel"><h4>AI review</h4>
+    <div class="note">not reviewed yet — run triage to draft a finding</div></div>`;
+  if (!f.ok) return `<div class="panel"><h4>AI review</h4>
+    <div class="kv"><b>${esc(f.title)}</b></div>
+    <div class="note">${esc(f.error || f.summary)}</div></div>`;
+  const unv = f.title.startsWith('[unverified]');
+  return `<div class="panel">
+    <h4>AI review — ${esc(f.provider)} · ${esc(f.model)}
+      ${unv ? '<span class="badge unv">no citations</span>' : ''}</h4>
+    <div class="finding-title">${esc(f.title)}</div>
+    <div class="kv">severity <b>${esc(f.severity)}</b> · confidence <b>${esc(f.confidence)}</b></div>
+    <div class="kv">${esc(f.summary)}</div>
+    ${f.probable_cause ? `<div class="kv">Probable cause: <b>${esc(f.probable_cause)}</b></div>` : ''}
+    ${f.remediation ? `<h4 style="margin-top:10px">Draft remediation — review before running</h4>
+      <div class="steps">${esc(f.remediation)}</div>` : ''}
+    ${f.citations && f.citations.length
+      ? `<div class="cites">cited events: ${f.citations.join(', ')}</div>` : ''}
+  </div>`;
+}
+
+async function loadIssues() {
+  try {
+    const list = await jget('/api/clusters?limit=40');
+    const el = document.getElementById('issues');
+    if (!list.length) { el.innerHTML = '<div class="empty">no events ingested yet</div>'; return; }
+
+    el.innerHTML = list.map((c, i) => {
+      const isOpen = open.has(c.fingerprint);
+      const sev = SEVC[c.min_severity] || 'var(--s6)';
+      const f = c.finding;
+      return `<div class="issue ${isOpen ? 'open' : ''}" style="--sev:${sev}" data-fp="${c.fingerprint}">
+        <div class="issue-hd" onclick="toggle('${c.fingerprint}')">
+          <div class="rank">${Math.round(c.score)}<small>SCORE</small></div>
+          <div style="min-width:0">
+            <div class="tmpl">${esc(c.template)}</div>
+            <div class="meta">${esc(c.severity_name)} · ${c.count} events ·
+              ${c.hosts.length} host${c.hosts.length === 1 ? '' : 's'} ·
+              ${esc(c.app || '-')} · ${esc(c.state)}</div>
+          </div>
+          <div style="display:flex;gap:5px;align-items:center">
+            ${f ? `<span class="badge ai">${f.ok ? esc(f.severity) : 'error'}</span>`
+                : '<span class="badge">unreviewed</span>'}
+          </div>
+        </div>
+        <div class="body" id="body-${c.fingerprint}">
+          ${isOpen ? '<div class="empty">loading…</div>' : ''}
+        </div>
+      </div>`;
+    }).join('');
+
+    open.forEach(fp => { if (list.some(c => c.fingerprint === fp)) loadDetail(fp); });
+  } catch (e) { toast('could not load issues: ' + e.message, true); }
+}
+
+async function loadDetail(fp) {
+  const body = document.getElementById('body-' + fp);
+  if (!body) return;
+  try {
+    const c = await jget('/api/clusters/' + fp);
+    const cited = new Set((c.finding && c.finding.citations) || []);
+    body.innerHTML = `
+      <div class="panel">
+        <h4>Why this ranked here</h4>
+        ${scorebar(c.score_breakdown)}
+      </div>
+      ${findingHTML(c.finding)}
+      <div class="panel">
+        <h4>Recent matching events</h4>
+        ${c.events.slice(0, 12).map(e => `
+          <div class="ev ${cited.has(e.id) ? 'cited' : ''}">
+            <span class="id">id=${e.id}</span>
+            <span style="color:${SEVC[e.severity]};min-width:52px">${esc(e.severity_name)}</span>
+            <span class="id">${esc(e.host || '')}</span>
+            <span class="msg">${esc(e.message)}</span>
+          </div>`).join('')}
+      </div>
+      <div class="acts">
+        <button class="primary" onclick="analyzeOne('${fp}')">Analyze this issue</button>
+        <button onclick="setState('${fp}','acked')">Acknowledge</button>
+        <button onclick="setState('${fp}','resolved')">Mark resolved</button>
+      </div>`;
+  } catch (e) {
+    body.innerHTML = `<div class="empty">could not load detail: ${esc(e.message)}</div>`;
+  }
+}
+
+function toggle(fp) {
+  if (open.has(fp)) { open.delete(fp); }
+  else { open.add(fp); }
+  const card = document.querySelector(`.issue[data-fp="${fp}"]`);
+  if (card) {
+    card.classList.toggle('open', open.has(fp));
+    if (open.has(fp)) loadDetail(fp);
+  }
+}
+
+async function analyzeOne(fp) {
+  if (busy) return;
+  busy = true; toast('analyzing…');
+  try {
+    const r = await fetch('/api/analyze/' + fp, { method: 'POST' });
+    const d = await r.json();
+    toast(d.ok ? 'finding drafted' : 'analysis failed: ' + (d.error || ''), !d.ok);
+  } catch (e) { toast('analysis failed: ' + e.message, true); }
+  busy = false;
+  loadDetail(fp); loadIssues(); loadHealth();
+}
+
+document.getElementById('btn-triage').onclick = async () => {
+  if (busy) return;
+  busy = true;
+  const b = document.getElementById('btn-triage');
+  b.disabled = true; b.textContent = 'Analyzing…';
+  try {
+    const d = await jget('/api/analyze', { method: 'POST' });
+    const failed = (d.results || []).filter(r => !r.ok).length;
+    toast(d.note || `reviewed ${d.analyzed} issue(s)` + (failed ? `, ${failed} failed` : ''), failed > 0);
+  } catch (e) { toast('triage failed: ' + e.message, true); }
+  b.disabled = false; b.textContent = 'Run AI triage';
+  busy = false;
+  loadIssues(); loadHealth();
+};
+
+document.getElementById('btn-refresh').onclick = () => { loadIssues(); loadStream(); loadHealth(); };
+
+async function setState(fp, state) {
+  await fetch(`/api/clusters/${fp}/state?state=${state}`, { method: 'POST' });
+  toast('marked ' + state);
+  loadIssues();
+}
+
+async function loadStream() {
+  const q = document.getElementById('f-q').value.trim();
+  const host = document.getElementById('f-host').value.trim();
+  const sev = document.getElementById('f-sev').value;
+  try {
+    const list = await jget(`/api/events?limit=140&severity_max=${sev}` +
+      `&q=${encodeURIComponent(q)}&host=${encodeURIComponent(host)}`);
+    document.getElementById('stream-count').textContent = `${list.length} shown`;
+    const el = document.getElementById('stream');
+    el.innerHTML = list.length ? list.map(e => `
+      <div class="line" style="--sv:${SEVC[e.severity]}">
+        <span class="tm">${esc((e.received_at || '').slice(11, 19))}</span>
+        <span class="sev">${esc(e.severity_name)}</span>
+        <span class="hs">${esc(e.host || '')}</span>
+        <span class="m">${esc(e.message)}</span>
+      </div>`).join('') : '<div class="empty">no matching events</div>';
+  } catch (e) {}
+}
+
+['f-q', 'f-host'].forEach(id => {
+  let t;
+  document.getElementById(id).addEventListener('input', () => {
+    clearTimeout(t); t = setTimeout(loadStream, 300);
+  });
+});
+document.getElementById('f-sev').addEventListener('change', loadStream);
+
+loadHealth(); loadIssues(); loadStream(); loadAlerts();
+setInterval(loadHealth, 5000);
+setInterval(loadIssues, 8000);
+setInterval(loadStream, 4000);
+setInterval(loadAlerts, 9000);
+</script>
+</body>
+</html>

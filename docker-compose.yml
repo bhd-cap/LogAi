@@ -1,0 +1,22 @@
+services:
+  logai:
+    build: .
+    ports:
+      - "8080:8080"
+      - "5514:5514/udp"
+      - "5514:5514/tcp"
+    volumes:
+      - logai-data:/data
+    environment:
+      # Talks to an Ollama running on the host machine.
+      LOGAI_PROVIDER: ollama
+      LOGAI_MODEL: qwen2.5:14b
+      LOGAI_BASE_URL: http://host.docker.internal:11434/v1
+      ANALYZE_TOP_N: 5
+      ALERT_SCORE_THRESHOLD: 80
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  logai-data:
